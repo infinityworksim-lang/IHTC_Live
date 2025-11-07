@@ -38,77 +38,103 @@
       font-size: 16px;
       border-radius: 6px;
       cursor: pointer;
+      margin-top: 10px;
     }
     button:hover {
       background-color: #005fa3;
+    }
+    #status {
+      margin-top: 10px;
+      color: #333;
+      font-weight: bold;
     }
   </style>
 </head>
 <body>
   <h1>🎥 IHTC Live Broadcast</h1>
   <button id="startBtn">Start Broadcast</button>
+  <p id="status">Idle</p>
   <div id="videos"></div>
 
   <script>
+    // 🧠 قراءة بيانات الرابط بأمان
     const urlParams = new URLSearchParams(window.location.search);
-    const appId = urlParams.get("appId");
-    const token = urlParams.get("token");
-    const channel = urlParams.get("channel");
-    const role = urlParams.get("role") || "audience";
+    const appId = urlParams.get("appId")?.trim();
+    const token = decodeURIComponent(urlParams.get("token") || "")?.trim();
+    const channel = urlParams.get("channel")?.trim();
+    const role = urlParams.get("role")?.trim() || "audience";
 
+    // عرض القيم في الكونسول للتأكد من وصولها
+    console.log("AppID:", appId);
+    console.log("Token:", token);
+    console.log("Channel:", channel);
+    console.log("Role:", role);
+
+    const statusLabel = document.getElementById("status");
     const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
     const localTracks = { video: null, audio: null };
 
+    // تخزين المستخدمين البعيدين
     const remoteUsers = {};
 
     async function startBroadcast() {
       if (!appId || !channel || !token) {
-        alert("Missing appId, channel, or token in URL");
+        alert("❌ Missing appId, channel, or token in URL");
         return;
       }
 
-      console.log(`Joining channel ${channel} as ${role}`);
+      statusLabel.innerText = "Connecting...";
+      console.log(`Joining channel "${channel}" as ${role}`);
 
       try {
+        // ضبط دور المستخدم (مُضيف أو مشاهد)
         await client.setClientRole(role);
 
+        // أحداث
         client.on("user-published", handleUserPublished);
         client.on("user-unpublished", handleUserUnpublished);
-        client.on("connection-state-change", (cur, prev) => {
-          console.log("Connection changed:", prev, "->", cur);
-        });
 
-        const uid = await client.join(appId, channel, token, null);
-        console.log("Joined channel with UID:", uid);
+        // الانضمام إلى القناة
+        const uid = await client.join(appId, channel, token || null, null);
+        console.log("✅ Joined channel with UID:", uid);
+        statusLabel.innerText = `Joined as ${role}`;
 
         if (role === "host") {
           try {
+            // إنشاء مسارات الصوت والصورة
             [localTracks.audio, localTracks.video] = await AgoraRTC.createMicrophoneAndCameraTracks();
           } catch (e) {
-            console.error("Camera or mic not available:", e);
-            alert("Camera or microphone in use by another app.");
+            console.error("Camera/Mic error:", e);
+            alert("Camera or microphone is already in use.");
+            statusLabel.innerText = "⚠️ Camera/Mic busy.";
             return;
           }
 
+          // عرض الفيديو المحلي
           const localPlayer = document.createElement("div");
           localPlayer.id = `local-player-${uid}`;
           localPlayer.innerHTML = `<video id="local-video" autoplay playsinline muted></video>`;
           document.getElementById("videos").appendChild(localPlayer);
           localTracks.video.play("local-video");
 
+          // نشر الصوت والصورة
           await client.publish(Object.values(localTracks));
-          console.log("Publishing local stream success");
+          console.log("✅ Publishing local stream success");
+          statusLabel.innerText = "📡 Broadcasting live...";
+        } else {
+          statusLabel.innerText = "👀 Watching live...";
         }
       } catch (error) {
         console.error("Error starting broadcast:", error);
+        statusLabel.innerText = "❌ " + error.message;
         alert("Error: " + error.message);
       }
     }
 
+    // عند بث مستخدم آخر
     async function handleUserPublished(user, mediaType) {
       console.log("User published:", user.uid);
       await client.subscribe(user, mediaType);
-      console.log("Subscribed to:", user.uid);
 
       if (mediaType === "video") {
         const player = document.createElement("div");
@@ -121,16 +147,20 @@
       if (mediaType === "audio") {
         user.audioTrack.play();
       }
+
+      statusLabel.innerText = "👀 Watching live...";
     }
 
+    // عند توقف المستخدم عن البث
     function handleUserUnpublished(user) {
       console.log("User unpublished:", user.uid);
       const player = document.getElementById(`player-${user.uid}`);
       if (player) player.remove();
+      statusLabel.innerText = "Stream ended.";
     }
 
+    // زر التشغيل
     document.getElementById("startBtn").addEventListener("click", startBroadcast);
   </script>
 </body>
 </html>
-
