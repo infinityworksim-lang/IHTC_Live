@@ -1,80 +1,141 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Dr Plus Live</title>
-  <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IHTC Live Broadcast</title>
+
+  <!-- تحميل مكتبة Agora Web SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/agora-rtc-sdk-ng@latest"></script>
+
+  <!-- تنسيقات بسيطة -->
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f0f0f5;
+      margin: 0;
+      padding: 0;
+    }
+
+    header {
+      background-color: #004aad;
+      color: white;
+      padding: 15px;
+      font-size: 20px;
+    }
+
+    #container {
+      margin-top: 40px;
+    }
+
+    #local-player, #remote-player {
+      width: 45%;
+      height: 300px;
+      background: black;
+      display: inline-block;
+      border-radius: 10px;
+      margin: 10px;
+    }
+
+    button {
+      background-color: #004aad;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      margin: 10px;
+      transition: background 0.3s;
+    }
+
+    button:hover {
+      background-color: #0073ff;
+    }
+
+    footer {
+      margin-top: 30px;
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
 </head>
-<body style="margin:0;padding:0;background:black;color:white;text-align:center;font-family:sans-serif;">
-  <h2 id="status">Connecting...</h2>
-  <div id="local_video" style="width:100%;max-height:50%;"></div>
-  <div id="remote_video" style="width:100%;height:50%;background:#000;"></div>
+
+<body>
+  <header>IHTC Live Broadcasting</header>
+
+  <div id="container">
+    <div id="local-player"></div>
+    <div id="remote-player"></div>
+
+    <div>
+      <button id="startBtn">Start Broadcast</button>
+      <button id="stopBtn">Stop Broadcast</button>
+    </div>
+  </div>
+
+  <footer>Powered by MANA © 2025</footer>
 
   <script>
-    const urlParams = new URLSearchParams(window.location.search);
-    const appId = urlParams.get("appId");
-    const token = urlParams.get("token");
-    const channel = urlParams.get("channel");
-    const role = urlParams.get("role"); // "host" or "audience"
-
-    console.log("AppId:", appId);
-    console.log("Token:", token);
-    console.log("Channel:", channel);
-    console.log("Role:", role);
-
-    if (!appId || !channel) {
-      document.getElementById("status").innerText = "❌ Missing appId or channel in URL.";
-      throw new Error("Missing required parameters");
-    }
+    // --- إعداد Agora ---
+    const APP_ID = "10f6a7d55d7f44e9b247d088329c66a2"; // ضع App ID الخاص بك هنا
+    const CHANNEL = "5555-6666";
+    const TOKEN = "007eJxTYHjOWOt104Pn+I8TITXMwmbsIn4bXr57ZVtzxpovW/eg3GEFBkODNLNE8xRT0xTzNBOTVMskIxPzFAMLC2Mjy2Qzs0SjB894MxsCGRlu1GozMEIhiM/JYAwEuiZAwMAAAHg0HkU="; // لو شغال بدون Token، خليه null
 
     const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
-    client.setClientRole(role || "audience");
+    let localTrack, localVideoTrack;
 
-    const localContainer = document.getElementById("local_video");
-    const remoteContainer = document.getElementById("remote_video");
-    const statusLabel = document.getElementById("status");
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const localPlayer = document.getElementById("local-player");
+    const remotePlayer = document.getElementById("remote-player");
 
-    async function startLive() {
-      try {
-        // ✅ join channel
-        const uid = await client.join(appId, channel, token || null, null);
-        statusLabel.innerText = `Joined as ${role} - UID: ${uid}`;
+    // بدء البث
+    startBtn.onclick = async () => {
+      startBtn.disabled = true;
+      console.log("Starting broadcast...");
 
-        if (role === "host") {
-          const [micTrack, camTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
-          const localPlayer = document.createElement("div");
-          localPlayer.id = `player-${uid}`;
-          localContainer.appendChild(localPlayer);
-          camTrack.play(localPlayer);
-          await client.publish([micTrack, camTrack]);
-          statusLabel.innerText = "Broadcasting live...";
-        }
+      await client.join(APP_ID, CHANNEL, TOKEN, null);
+      [localTrack, localVideoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
 
-        client.on("user-published", async (user, mediaType) => {
-          await client.subscribe(user, mediaType);
-          if (mediaType === "video") {
-            const remotePlayer = document.createElement("div");
-            remotePlayer.id = `player-${user.uid}`;
-            remoteContainer.innerHTML = "";
-            remoteContainer.appendChild(remotePlayer);
-            user.videoTrack.play(remotePlayer);
-            statusLabel.innerText = "Watching live stream...";
-          }
-        });
+      localVideoTrack.play(localPlayer);
 
-        client.on("user-unpublished", user => {
-          const player = document.getElementById(`player-${user.uid}`);
-          if (player) player.remove();
-          statusLabel.innerText = "Stream ended";
-        });
+      await client.publish([localTrack, localVideoTrack]);
+      console.log("Broadcasting...");
+    };
 
-      } catch (err) {
-        console.error(err);
-        statusLabel.innerText = "Error: " + err.message;
+    // إيقاف البث
+    stopBtn.onclick = async () => {
+      if (localTrack) {
+        localTrack.close();
+        localVideoTrack.close();
+        client.unpublish();
+        await client.leave();
+        localPlayer.innerHTML = "";
+        console.log("Broadcast stopped.");
       }
-    }
+      startBtn.disabled = false;
+    };
 
-    startLive();
+    // استقبال مشاهدين
+    client.on("user-published", async (user, mediaType) => {
+      await client.subscribe(user, mediaType);
+      console.log("User subscribed:", user.uid);
+
+      if (mediaType === "video") {
+        const remoteContainer = document.getElementById("remote-player");
+        user.videoTrack.play(remoteContainer);
+      }
+      if (mediaType === "audio") {
+        user.audioTrack.play();
+      }
+    });
+
+    client.on("user-unpublished", (user) => {
+      console.log("User left:", user.uid);
+      remotePlayer.innerHTML = "";
+    });
   </script>
 </body>
 </html>
