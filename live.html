@@ -1,58 +1,62 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Dr Plus Live</title>
-  <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
-</head>
-<body style="margin:0;padding:0;background:black;color:white;text-align:center;font-family:sans-serif;">
+<script>
+  const urlParams = new URLSearchParams(window.location.search);
+  const appId = urlParams.get("appId");
+  const token = urlParams.get("token");
+  const channel = urlParams.get("channel");
+  const role = urlParams.get("role"); // "host" or "audience"
 
-  <h2 id="status">Connecting...</h2>
-  <video id="local_video" autoplay playsinline style="width:100%;max-height:50%;"></video>
-  <div id="remote_video" style="width:100%;height:50%;background:#000;"></div>
+  const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+  client.setClientRole(role);
 
-  <script>
-    const urlParams = new URLSearchParams(window.location.search);
-    const appId = urlParams.get("appId");
-    const token = urlParams.get("token");
-    const channel = urlParams.get("channel");
-    const role = urlParams.get("role"); // 'host' or 'audience'
+  const localContainer = document.getElementById("local_video");
+  const remoteContainer = document.getElementById("remote_video");
+  const statusLabel = document.getElementById("status");
 
-    const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
-    client.setClientRole(role);
-
-    async function start() {
-      await client.init(appId);
-      const uid = await client.join(appId, channel, token, null);
-      document.getElementById("status").innerText = `Joined as ${role} - UID ${uid}`;
+  async function startLive() {
+    try {
+      // Join the channel
+      const uid = await client.join(appId, channel, token || null, null);
+      statusLabel.innerText = `Joined as ${role} - UID: ${uid}`;
 
       if (role === "host") {
-        const localStream = AgoraRTC.createStream({
-          streamID: uid,
-          audio: true,
-          video: true,
-          screen: false
-        });
-        localStream.init(() => {
-          document.getElementById("status").innerText = "Broadcasting...";
-          localStream.play("local_video");
-          client.publish(localStream);
-        });
+        // 🎥 إنشاء تراك الصوت والصورة
+        const [micTrack, camTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+
+        // عرض الفيديو المحلي
+        const localPlayer = document.createElement("div");
+        localPlayer.id = `player-${uid}`;
+        localContainer.appendChild(localPlayer);
+        camTrack.play(localPlayer);
+
+        // نشر الفيديو والصوت
+        await client.publish([micTrack, camTrack]);
+        statusLabel.innerText = "Broadcasting live...";
       }
 
-      client.on("stream-added", evt => {
-        const stream = evt.stream;
-        client.subscribe(stream);
+      // 📡 استقبال البث للمشاهدين
+      client.on("user-published", async (user, mediaType) => {
+        await client.subscribe(user, mediaType);
+        if (mediaType === "video") {
+          const remotePlayer = document.createElement("div");
+          remotePlayer.id = `player-${user.uid}`;
+          remoteContainer.innerHTML = "";
+          remoteContainer.appendChild(remotePlayer);
+          user.videoTrack.play(remotePlayer);
+          statusLabel.innerText = "Watching live stream...";
+        }
       });
 
-      client.on("stream-subscribed", evt => {
-        const stream = evt.stream;
-        document.getElementById("status").innerText = "Watching stream...";
-        stream.play("remote_video");
+      client.on("user-unpublished", user => {
+        const player = document.getElementById(`player-${user.uid}`);
+        if (player) player.remove();
+        statusLabel.innerText = "Stream ended";
       });
+
+    } catch (err) {
+      console.error(err);
+      statusLabel.innerText = "Error: " + err.message;
     }
+  }
 
-    start();
-  </script>
-</body>
-</html>
+  startLive();
+</script>
