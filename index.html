@@ -2,123 +2,165 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>IHTC Live</title>
-  <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
+  <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.24.0.js"></script>
   <style>
     body {
-      margin: 0;
       font-family: Arial, sans-serif;
-      background-color: #0e0e0e;
-      color: #fff;
+      background-color: #f3f3f3;
+      margin: 0;
+      padding: 0;
       text-align: center;
     }
-    #container {
+    h1 {
+      color: #222;
+      margin-top: 15px;
+    }
+    #videos {
       display: flex;
       justify-content: center;
-      align-items: center;
-      height: 100vh;
-      flex-direction: column;
-    }
-    #video-container {
-      display: flex;
       flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
-    }
-    video {
-      width: 45vw;
-      height: 45vh;
-      border-radius: 10px;
-      background: #000;
-      object-fit: cover;
-    }
-    #start-btn {
-      background-color: #0078ff;
-      border: none;
-      padding: 12px 24px;
-      color: white;
-      font-size: 16px;
-      border-radius: 8px;
-      cursor: pointer;
       margin-top: 20px;
     }
-    #start-btn:hover {
-      background-color: #005bcc;
+    video {
+      width: 45%;
+      max-width: 480px;
+      border-radius: 10px;
+      margin: 10px;
+      background: black;
+    }
+    button {
+      background-color: #0078d7;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:hover {
+      background-color: #005fa3;
+    }
+    #status {
+      margin-top: 10px;
+      color: #333;
+      font-weight: bold;
     }
   </style>
 </head>
 <body>
-  <div id="container">
-    <h2>🎥 IHTC Live Broadcast</h2>
-    <div id="video-container">
-      <div id="local-player"></div>
-      <div id="remote-player"></div>
-    </div>
-    <button id="start-btn">Start Broadcast</button>
-  </div>
+  <h1>🎥 IHTC Live Broadcast</h1>
+  <button id="startBtn">Start Broadcast</button>
+  <p id="status">Idle</p>
+  <div id="videos"></div>
 
   <script>
-    // قراءة الـ parameters من الرابط
+    // 🧠 قراءة بيانات الرابط بأمان
     const urlParams = new URLSearchParams(window.location.search);
-    const appId = urlParams.get("appId");
-    const token = urlParams.get("token");
-    const channel = urlParams.get("channel");
-    const role = urlParams.get("role") || "audience";
+    const appId = urlParams.get("appId")?.trim();
+    const token = decodeURIComponent(urlParams.get("token") || "")?.trim();
+    const channel = urlParams.get("channel")?.trim();
+    const role = urlParams.get("role")?.trim() || "audience";
 
-    console.log("AppID:", appId, "Token:", token, "Channel:", channel, "Role:", role);
+    // عرض القيم في الكونسول للتأكد من وصولها
+    console.log("AppID:", appId);
+    console.log("Token:", token);
+    console.log("Channel:", channel);
+    console.log("Role:", role);
 
-    if (!appId || !channel) {
-      alert("❌ Missing appId or channel in URL");
-    }
-
+    const statusLabel = document.getElementById("status");
     const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+    const localTracks = { video: null, audio: null };
+
+    // تخزين المستخدمين البعيدين
+    const remoteUsers = {};
 
     async function startBroadcast() {
+      if (!appId || !channel || !token) {
+        alert("❌ Missing appId, channel, or token in URL");
+        return;
+      }
+
+      statusLabel.innerText = "Connecting...";
+      console.log(`Joining channel "${channel}" as ${role}`);
+
       try {
+        // ضبط دور المستخدم (مُضيف أو مشاهد)
+        await client.setClientRole(role);
+
+        // أحداث
+        client.on("user-published", handleUserPublished);
+        client.on("user-unpublished", handleUserUnpublished);
+
+        // الانضمام إلى القناة
+        const uid = await client.join(appId, channel, token || null, null);
+        console.log("✅ Joined channel with UID:", uid);
+        statusLabel.innerText = `Joined as ${role}`;
+
         if (role === "host") {
-          client.setClientRole("host");
-          const uid = await client.join(appId, channel, token || null, null);
-          const localTrack = await AgoraRTC.createMicrophoneAndCameraTracks();
-          const localContainer = document.createElement("div");
-          localContainer.id = `player-${uid}`;
-          localContainer.style.border = "2px solid #0078ff";
-          document.getElementById("local-player").append(localContainer);
-          localTrack[1].play(localContainer);
-          await client.publish(localTrack);
-          console.log("🎤 Host publishing stream");
+          try {
+            // إنشاء مسارات الصوت والصورة
+            [localTracks.audio, localTracks.video] = await AgoraRTC.createMicrophoneAndCameraTracks();
+          } catch (e) {
+            console.error("Camera/Mic error:", e);
+            alert("Camera or microphone is already in use.");
+            statusLabel.innerText = "⚠️ Camera/Mic busy.";
+            return;
+          }
+
+          // عرض الفيديو المحلي
+          const localPlayer = document.createElement("div");
+          localPlayer.id = `local-player-${uid}`;
+          localPlayer.innerHTML = `<video id="local-video" autoplay playsinline muted></video>`;
+          document.getElementById("videos").appendChild(localPlayer);
+          localTracks.video.play("local-video");
+
+          // نشر الصوت والصورة
+          await client.publish(Object.values(localTracks));
+          console.log("✅ Publishing local stream success");
+          statusLabel.innerText = "📡 Broadcasting live...";
         } else {
-          client.setClientRole("audience");
-          const uid = await client.join(appId, channel, token || null, null);
-          console.log("🎧 Audience joined:", uid);
-          client.on("user-published", async (user, mediaType) => {
-            await client.subscribe(user, mediaType);
-            if (mediaType === "video") {
-              const remoteContainer = document.createElement("div");
-              remoteContainer.id = `player-${user.uid}`;
-              document.getElementById("remote-player").innerHTML = "";
-              document.getElementById("remote-player").append(remoteContainer);
-              user.videoTrack.play(remoteContainer);
-            }
-            if (mediaType === "audio") {
-              user.audioTrack.play();
-            }
-          });
+          statusLabel.innerText = "👀 Watching live...";
         }
-      } catch (err) {
-        console.error("Agora error:", err);
-        alert("Agora Error: " + err.message);
+      } catch (error) {
+        console.error("Error starting broadcast:", error);
+        statusLabel.innerText = "❌ " + error.message;
+        alert("Error: " + error.message);
       }
     }
 
-    // الزر يظهر فقط للمضيف
-    const startBtn = document.getElementById("start-btn");
-    if (role === "audience") {
-      startBtn.style.display = "none";
-      // البدء التلقائي للمشاهدين
-      startBroadcast();
-    } else {
-      startBtn.addEventListener("click", startBroadcast);
+    // عند بث مستخدم آخر
+    async function handleUserPublished(user, mediaType) {
+      console.log("User published:", user.uid);
+      await client.subscribe(user, mediaType);
+
+      if (mediaType === "video") {
+        const player = document.createElement("div");
+        player.id = `player-${user.uid}`;
+        player.innerHTML = `<video id="video-${user.uid}" autoplay playsinline></video>`;
+        document.getElementById("videos").appendChild(player);
+        user.videoTrack.play(`video-${user.uid}`);
+      }
+
+      if (mediaType === "audio") {
+        user.audioTrack.play();
+      }
+
+      statusLabel.innerText = "👀 Watching live...";
     }
+
+    // عند توقف المستخدم عن البث
+    function handleUserUnpublished(user) {
+      console.log("User unpublished:", user.uid);
+      const player = document.getElementById(`player-${user.uid}`);
+      if (player) player.remove();
+      statusLabel.innerText = "Stream ended.";
+    }
+
+    // زر التشغيل
+    document.getElementById("startBtn").addEventListener("click", startBroadcast);
   </script>
 </body>
 </html>
