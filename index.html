@@ -1,65 +1,136 @@
-<script>
-  const urlParams = new URLSearchParams(window.location.search);
-  const appId = urlParams.get("appId");
-  const token = urlParams.get("token");
-  const channel = urlParams.get("channel");
-  const role = urlParams.get("role"); // "host" or "audience"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IHTC Live</title>
+  <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.24.0.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f3f3f3;
+      margin: 0;
+      padding: 0;
+      text-align: center;
+    }
+    h1 {
+      color: #222;
+      margin-top: 15px;
+    }
+    #videos {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+    video {
+      width: 45%;
+      max-width: 480px;
+      border-radius: 10px;
+      margin: 10px;
+      background: black;
+    }
+    button {
+      background-color: #0078d7;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #005fa3;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎥 IHTC Live Broadcast</h1>
+  <button id="startBtn">Start Broadcast</button>
+  <div id="videos"></div>
 
-  const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
-  client.setClientRole(role);
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const appId = urlParams.get("appId");
+    const token = urlParams.get("token");
+    const channel = urlParams.get("channel");
+    const role = urlParams.get("role") || "audience";
 
-  const localContainer = document.getElementById("local_video");
-  const remoteContainer = document.getElementById("remote_video");
-  const statusLabel = document.getElementById("status");
+    const client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+    const localTracks = { video: null, audio: null };
 
-  async function startLive() {
-    try {
-      // Join the channel
-      const uid = await client.join(appId, channel, token || null, null);
-      statusLabel.innerText = `Joined as ${role} - UID: ${uid}`;
+    const remoteUsers = {};
 
-      if (role === "host") {
-        // 🎥 إنشاء تراك الصوت والصورة
-        const [micTrack, camTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
-
-        // عرض الفيديو المحلي
-        const localPlayer = document.createElement("div");
-        localPlayer.id = `player-${uid}`;
-        localContainer.appendChild(localPlayer);
-        camTrack.play(localPlayer);
-
-        // نشر الفيديو والصوت
-        await client.publish([micTrack, camTrack]);
-        statusLabel.innerText = "Broadcasting live...";
+    async function startBroadcast() {
+      if (!appId || !channel || !token) {
+        alert("Missing appId, channel, or token in URL");
+        return;
       }
 
-      // 📡 استقبال البث للمشاهدين
-      client.on("user-published", async (user, mediaType) => {
-        await client.subscribe(user, mediaType);
-        if (mediaType === "video") {
-          const remotePlayer = document.createElement("div");
-          remotePlayer.id = `player-${user.uid}`;
-          remoteContainer.innerHTML = "";
-          remoteContainer.appendChild(remotePlayer);
-          user.videoTrack.play(remotePlayer);
-          statusLabel.innerText = "Watching live stream...";
+      console.log(`Joining channel ${channel} as ${role}`);
+
+      try {
+        await client.setClientRole(role);
+
+        client.on("user-published", handleUserPublished);
+        client.on("user-unpublished", handleUserUnpublished);
+        client.on("connection-state-change", (cur, prev) => {
+          console.log("Connection changed:", prev, "->", cur);
+        });
+
+        const uid = await client.join(appId, channel, token, null);
+        console.log("Joined channel with UID:", uid);
+
+        if (role === "host") {
+          try {
+            [localTracks.audio, localTracks.video] = await AgoraRTC.createMicrophoneAndCameraTracks();
+          } catch (e) {
+            console.error("Camera or mic not available:", e);
+            alert("Camera or microphone in use by another app.");
+            return;
+          }
+
+          const localPlayer = document.createElement("div");
+          localPlayer.id = `local-player-${uid}`;
+          localPlayer.innerHTML = `<video id="local-video" autoplay playsinline muted></video>`;
+          document.getElementById("videos").appendChild(localPlayer);
+          localTracks.video.play("local-video");
+
+          await client.publish(Object.values(localTracks));
+          console.log("Publishing local stream success");
         }
-      });
-
-      client.on("user-unpublished", user => {
-        const player = document.getElementById(`player-${user.uid}`);
-        if (player) player.remove();
-        statusLabel.innerText = "Stream ended";
-      });
-
-    } catch (err) {
-      console.error(err);
-      statusLabel.innerText = "Error: " + err.message;
+      } catch (error) {
+        console.error("Error starting broadcast:", error);
+        alert("Error: " + error.message);
+      }
     }
-  }
 
-  startLive();
-</script>
+    async function handleUserPublished(user, mediaType) {
+      console.log("User published:", user.uid);
+      await client.subscribe(user, mediaType);
+      console.log("Subscribed to:", user.uid);
 
+      if (mediaType === "video") {
+        const player = document.createElement("div");
+        player.id = `player-${user.uid}`;
+        player.innerHTML = `<video id="video-${user.uid}" autoplay playsinline></video>`;
+        document.getElementById("videos").appendChild(player);
+        user.videoTrack.play(`video-${user.uid}`);
+      }
 
-https://infinityworksim-lang.github.io/IHTC_Live/?appId=10f6a7d55d7f44e9b247d088329c66a2&token=007eJxTYPgRW2Gc1aw5J+vG6z/pRafOLPy/al138345ox4G012ZIX8UGAwN0swSzVNMTVPM00xMUi2TjEzMUwwsLIyNLJPNzBKN1IX5MhsCGRn8lsoyMEIhiM/JYAoEumZAwMAAAFHRH4w=&channel=5555-6666&role=audience
+      if (mediaType === "audio") {
+        user.audioTrack.play();
+      }
+    }
+
+    function handleUserUnpublished(user) {
+      console.log("User unpublished:", user.uid);
+      const player = document.getElementById(`player-${user.uid}`);
+      if (player) player.remove();
+    }
+
+    document.getElementById("startBtn").addEventListener("click", startBroadcast);
+  </script>
+</body>
+</html>
+
